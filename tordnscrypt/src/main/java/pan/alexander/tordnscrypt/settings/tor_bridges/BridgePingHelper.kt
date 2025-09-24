@@ -51,7 +51,7 @@ class BridgePingHelper @Inject constructor(
 ) {
 
     private val webTunnelBridgePattern by lazy {
-        Pattern.compile("^webtunnel +(.+:\\d+)(?: +\\w+)? +url=(http(s)?://[\\w.-]+)(?:/[\\w.-]+)*/?")
+        Pattern.compile("^webtunnel +(.+:\\d+)(?: +\\w+)? +url=(http(s)?://[\\w.:-]+)(/[\\w.-]+)*/?")
     }
 
     private val meekLiteBridgePattern by lazy {
@@ -77,20 +77,31 @@ class BridgePingHelper @Inject constructor(
                 val matcher = webTunnelBridgePattern.matcher(bridge.bridge)
                 if (matcher.find()) {
                     val ipWithPort = matcher.group(1) ?: continue
-                    val domain = matcher.group(2) ?: continue
-                    val port = if (domain.startsWith("https")) {
-                        443
+                    val url = matcher.group(2) ?: continue
+                    val addr = bridge.bridge.split(" ").firstOrNull() {
+                        it.startsWith("addr=")
+                    }?.removePrefix("addr=")
+                    val address = if (addr?.isEmpty() != false) {
+                        val domain = url.replace(Regex("http(s)?://"), "")
+                        val port = if (domain.contains(":")) {
+                            domain.substringAfter(":").toIntOrNull() ?: 443
+                        } else if (url.startsWith("https")) {
+                            443
+                        } else {
+                            80
+                        }
+                        val ip = getWorkingIp(domain.removeSuffix(":$port"), port)
+
+                        ensureActive()
+                        if (ip.isEmpty()) {
+                            continue
+                        }
+
+                        getAddress(ip, port)
                     } else {
-                        80
-                    }
-                    val ip = getWorkingIp(domain.replace(Regex("http(s)?://"), ""), port)
-
-                    ensureActive()
-                    if (ip.isEmpty()) {
-                        continue
+                        addr
                     }
 
-                    val address = getAddress(ip, port)
                     val bridgeLine = bridge.bridge.replace(ipWithPort, address)
                     bridgesToMeasure.add(bridgeLine)
                     bridgesMatcherMap[bridgeLine.hashCode()] =
@@ -281,7 +292,7 @@ class BridgePingHelper @Inject constructor(
                 }
             }.awaitAll()
                 .filter { it.isNotEmpty() }
-                .minByOrNull { it.isIPv6Address() } ?: ""
+                .minByOrNull { it.isIPv6Address() } ?: ips.firstOrNull() ?: ""
         }
     }
 
